@@ -134,8 +134,61 @@ function LoginPage({ onLogin }) {
   );
 }
 
+// ─── PIX UPLOADER ────────────────────────────────────────────────────────────
+function PixUploader({ orderId, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [uploaded, setUploaded] = useState(false);
+  const fileRef = useRef();
+
+  function handleFile(e) {
+    const f = e.target.files[0]; if(!f) return;
+    setFile(f);
+    const reader = new FileReader();
+    reader.onload = ev => setPreview(ev.target.result);
+    reader.readAsDataURL(f);
+  }
+
+  function handleUpload() {
+    if(!preview) return;
+    onUploaded(orderId, preview);
+    setUploaded(true);
+  }
+
+  if(uploaded) return (
+    <div style={{background:theme.accentDim,borderRadius:12,padding:"16px",textAlign:"center"}}>
+      <div style={{color:theme.accent,marginBottom:8}}><Icon name="check" size={28}/></div>
+      <div style={{fontFamily:"Syne",fontWeight:700,fontSize:15,color:theme.accent}}>Comprovante enviado!</div>
+      <div style={{fontSize:12,color:theme.textSub,marginTop:4}}>O vendedor irá confirmar e separar seu pedido.</div>
+    </div>
+  );
+
+  return (
+    <div style={{background:theme.bg,borderRadius:12,padding:16,border:`1px solid ${theme.border}`}}>
+      <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>📎 Anexar comprovante do Pix</div>
+      <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={handleFile} style={{display:"none"}}/>
+      {!preview ? (
+        <div onClick={()=>fileRef.current.click()} style={{border:`2px dashed ${theme.border}`,borderRadius:10,padding:"24px 16px",textAlign:"center",cursor:"pointer",color:theme.textSub}}>
+          <Icon name="upload" size={24}/>
+          <div style={{fontSize:13,marginTop:8}}>Clique para selecionar o comprovante</div>
+          <div style={{fontSize:11,marginTop:4}}>PNG, JPG ou PDF</div>
+        </div>
+      ) : (
+        <div style={{position:"relative"}}>
+          <img src={preview} alt="comprovante" style={{width:"100%",borderRadius:8,maxHeight:200,objectFit:"contain",background:"#000"}}/>
+          <button onClick={()=>{setFile(null);setPreview(null);}} style={{position:"absolute",top:8,right:8,width:28,height:28,borderRadius:"50%",background:"rgba(0,0,0,0.7)",border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="x" size={14}/></button>
+        </div>
+      )}
+      <button onClick={handleUpload} disabled={!preview}
+        style={{width:"100%",marginTop:12,padding:13,background:preview?theme.accent:theme.borderLight,color:preview?"#000":theme.textDim,border:"none",borderRadius:10,fontFamily:"Syne",fontWeight:700,fontSize:14,cursor:preview?"pointer":"default"}}>
+        Enviar comprovante
+      </button>
+    </div>
+  );
+}
+
 // ─── CART MODAL ───────────────────────────────────────────────────────────────
-function CartModal({ cart, products, onClose, onOrderPlaced }) {
+function CartModal({ cart, products, onClose, onOrderPlaced, onUpdateCart, onPixUploaded }) {
   const [step, setStep] = useState("cart");
   const [form, setForm] = useState({name:"",phone:"",address:""});
   const [loading, setLoading] = useState(false);
@@ -145,11 +198,15 @@ function CartModal({ cart, products, onClose, onOrderPlaced }) {
   }).filter(Boolean);
   const total = items.reduce((s,i)=>s+i.price*i.qty,0);
 
+  const [lastOrderId, setLastOrderId] = useState(null);
+
   async function handleSubmit() {
     if (!form.name||!form.phone||!form.address) return;
     setLoading(true);
-    const order = { id:"o"+Date.now(), customerName:form.name, customerPhone:form.phone, address:form.address, items:items.map(i=>({productId:i.id,productName:i.name,qty:i.qty,price:i.price})), total, status:"pending", createdAt:Date.now(), pixProof:null, trackingCode:null };
+    const oid = "o"+Date.now();
+    const order = { id:oid, customerName:form.name, customerPhone:form.phone, address:form.address, items:items.map(i=>({productId:i.id,productName:i.name,qty:i.qty,price:i.price})), total, status:"pending", createdAt:Date.now(), pixProof:null, trackingCode:null };
     await onOrderPlaced(order);
+    setLastOrderId(oid);
     setLoading(false); setStep("success");
   }
 
@@ -169,8 +226,18 @@ function CartModal({ cart, products, onClose, onOrderPlaced }) {
               : <>
                   {items.map(item=>(
                     <div key={item.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 0",borderBottom:`1px solid ${theme.border}`}}>
-                      <div><div style={{fontSize:14,fontWeight:500}}>{item.name}</div><div style={{fontSize:12,color:theme.textSub,marginTop:2}}>{item.qty}x {fmtPrice(item.price)}</div></div>
-                      <div style={{fontFamily:"Syne",fontWeight:700,color:theme.accent}}>{fmtPrice(item.price*item.qty)}</div>
+                      <div style={{flex:1,minWidth:0,marginRight:12}}>
+                        <div style={{fontSize:14,fontWeight:500}}>{item.name}</div>
+                        <div style={{fontSize:12,color:theme.textSub,marginTop:2}}>{fmtPrice(item.price)} cada</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                        <button onClick={()=>onUpdateCart(item.id, item.qty-1)} style={{width:28,height:28,borderRadius:8,background:theme.surfaceHigh,border:`1px solid ${theme.border}`,color:item.qty===1?theme.danger:theme.text,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontWeight:700}}>
+                          {item.qty===1?"×":"−"}
+                        </button>
+                        <span style={{fontFamily:"Syne",fontWeight:700,fontSize:15,minWidth:20,textAlign:"center"}}>{item.qty}</span>
+                        <button onClick={()=>onUpdateCart(item.id, item.qty+1)} disabled={item.qty>=item.stock} style={{width:28,height:28,borderRadius:8,background:item.qty>=item.stock?theme.borderLight:theme.accentDim,border:`1px solid ${item.qty>=item.stock?theme.border:theme.accent+"44"}`,color:item.qty>=item.stock?theme.textDim:theme.accent,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",cursor:item.qty>=item.stock?"default":"pointer",fontWeight:700}}>+</button>
+                        <div style={{fontFamily:"Syne",fontWeight:700,color:theme.accent,minWidth:64,textAlign:"right"}}>{fmtPrice(item.price*item.qty)}</div>
+                      </div>
                     </div>
                   ))}
                   <div style={{display:"flex",justifyContent:"space-between",padding:"16px 0 0",fontFamily:"Syne",fontWeight:700,fontSize:18}}>
@@ -195,14 +262,13 @@ function CartModal({ cart, products, onClose, onOrderPlaced }) {
             </>
           )}
           {step==="success" && (
-            <div style={{textAlign:"center",padding:"16px 0"}}>
-              <div style={{width:64,height:64,borderRadius:"50%",background:theme.accentDim,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 20px",color:theme.accent}}><Icon name="check" size={32}/></div>
-              <div style={{fontFamily:"Syne",fontWeight:800,fontSize:22,marginBottom:8}}>Pedido enviado!</div>
-              <div style={{color:theme.textSub,fontSize:14,lineHeight:1.6,marginBottom:24}}>Envie o comprovante do Pix no WhatsApp para confirmar seu pedido.</div>
-              <button onClick={()=>window.open(`https://wa.me/5511999999999?text=${encodeURIComponent(`Olá! Fiz um pedido. Total: ${fmtPrice(total)}. Segue o comprovante!`)}`, "_blank")}
-                style={{width:"100%",padding:14,background:"#25D366",color:"#fff",border:"none",borderRadius:10,fontFamily:"Syne",fontWeight:700,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer"}}>
-                <Icon name="whatsapp" size={18}/> Enviar comprovante no WhatsApp
-              </button>
+            <div style={{padding:"8px 0"}}>
+              <div style={{textAlign:"center",marginBottom:24}}>
+                <div style={{width:64,height:64,borderRadius:"50%",background:theme.accentDim,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",color:theme.accent}}><Icon name="check" size={32}/></div>
+                <div style={{fontFamily:"Syne",fontWeight:800,fontSize:22,marginBottom:6}}>Pedido confirmado!</div>
+                <div style={{color:theme.textSub,fontSize:13,lineHeight:1.6}}>Agora envie o comprovante do Pix para finalizar.</div>
+              </div>
+              <PixUploader orderId={lastOrderId} onUploaded={onPixUploaded}/>
               <button onClick={onClose} style={{width:"100%",marginTop:10,padding:12,background:"none",color:theme.textSub,border:`1px solid ${theme.border}`,borderRadius:10,fontSize:14,cursor:"pointer"}}>Fechar</button>
             </div>
           )}
@@ -348,13 +414,25 @@ function OrderDetailModal({ order, onClose, onUpdateStatus, onUpdateTracking }) 
             </div>
           )}
           {order.pixProof && (
-            <div style={{background:theme.accentDim,borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
-              <div style={{color:theme.accent}}><Icon name="check" size={18}/></div>
-              <div style={{fontSize:13,color:theme.accent}}>Comprovante Pix recebido: {order.pixProof}</div>
+            <div>
+              <div style={{fontSize:12,color:theme.textSub,marginBottom:10,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.08em"}}>Comprovante Pix</div>
+              <div style={{borderRadius:10,overflow:"hidden",border:`1px solid ${theme.border}`,marginBottom:12}}>
+                <img src={order.pixProof} alt="Comprovante" style={{width:"100%",maxHeight:300,objectFit:"contain",background:"#000",display:"block"}}/>
+              </div>
+              {order.status==="pending" && (
+                <button onClick={()=>onUpdateStatus(order.id,"paid")} style={{width:"100%",padding:13,background:theme.info+"22",color:theme.info,border:`1px solid ${theme.info}44`,borderRadius:10,fontFamily:"Syne",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:8}}>
+                  ✓ Confirmar pagamento
+                </button>
+              )}
+            </div>
+          )}
+          {!order.pixProof && order.status==="pending" && (
+            <div style={{background:theme.warning+"11",border:`1px solid ${theme.warning}33`,borderRadius:10,padding:"12px 14px",fontSize:13,color:theme.warning}}>
+              ⏳ Aguardando comprovante do cliente
             </div>
           )}
           {order.status==="pending" && (
-            <button onClick={()=>onUpdateStatus(order.id,"cancelled")} style={{padding:12,background:"none",color:theme.danger,border:`1px solid ${theme.danger}33`,borderRadius:10,fontSize:13,cursor:"pointer"}}>Cancelar pedido</button>
+            <button onClick={()=>onUpdateStatus(order.id,"cancelled")} style={{padding:12,background:"none",color:theme.danger,border:`1px solid ${theme.danger}33`,borderRadius:10,fontSize:13,cursor:"pointer",width:"100%"}}>Cancelar pedido</button>
           )}
         </div>
       </div>
@@ -610,7 +688,7 @@ export default function App() {
           : <LoginPage onLogin={handleLogin}/>
         : <>
             <CatalogPage products={products} cart={cart} onAddToCart={id=>setCart(c=>({...c,[id]:(c[id]||0)+1}))} onOpenCart={()=>setCartOpen(true)}/>
-            {cartOpen && <CartModal cart={cart} products={products} onClose={()=>setCartOpen(false)} onOrderPlaced={handleOrderPlaced}/>}
+            {cartOpen && <CartModal cart={cart} products={products} onClose={()=>setCartOpen(false)} onOrderPlaced={handleOrderPlaced} onUpdateCart={(id,qty)=>setCart(c=>{if(qty<=0){const{[id]:_,...rest}=c;return rest;}return{...c,[id]:qty};})} onPixUploaded={(oid,proof)=>so(orders.map(o=>o.id===oid?{...o,pixProof:proof}:o))} />}
           </>
       }
     </>
